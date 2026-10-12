@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D 粒子交互视觉系统</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #000;
+      overflow: hidden;
+      user-select: none;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #container {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+      background: #000;
+    }
+
+    #container canvas {
+      display: block;
+    }
+
+    /* ---- Loading Screen ---- */
+    #loading {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: radial-gradient(ellipse at center, #0a0a1a 0%, #000 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      transition: opacity 0.8s ease;
+    }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+    #loading .spinner {
+      width: 60px; height: 60px;
+      border: 3px solid rgba(255,255,255,0.08);
+      border-top-color: #ff6b9d;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading p {
+      margin-top: 24px;
+      font-size: 15px;
+      font-weight: 300;
+      letter-spacing: 2px;
+      color: rgba(255,255,255,0.7);
+    }
+    #loading .progress-bar {
+      width: 240px; height: 3px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 4px;
+      margin-top: 16px;
+      overflow: hidden;
+    }
+    #loading .progress-bar span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #ff6b9d, #8456f0, #00d4ff);
+      border-radius: 4px;
+      transition: width 0.4s ease;
+    }
+
+    /* ---- Error ---- */
+    #error {
+      position: fixed;
+      inset: 0;
+      z-index: 999;
+      background: rgba(0,0,0,0.85);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      padding: 40px;
+      text-align: center;
+    }
+    #error.visible { display: flex; }
+    #error h2 { font-size: 24px; margin-bottom: 12px; }
+    #error p { font-size: 14px; color: rgba(255,255,255,0.6); max-width: 400px; line-height: 1.6; }
+
+    /* ---- Controls Panel (Right) ---- */
+    #controls {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 240px;
+      background: rgba(10, 10, 30, 0.72);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 20px 18px;
+      color: #fff;
+      z-index: 10;
+      max-height: calc(100vh - 40px);
+      overflow-y: auto;
+      box-shadow: 0 8px 48px rgba(0,0,0,0.5);
+    }
+    #controls::-webkit-scrollbar { width: 3px; }
+    #controls::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+
+    #controls h2 {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      margin-bottom: 18px;
+      background: linear-gradient(135deg, #ff6b9d, #8456f0);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .control-group { margin-bottom: 18px; }
+    .control-group:last-child { margin-bottom: 0; }
+    .control-group > label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: rgba(255,255,255,0.45);
+      margin-bottom: 10px;
+    }
+
+    .model-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .model-grid button {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 10px 6px;
+      color: rgba(255,255,255,0.7);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      font-family: inherit;
+    }
+    .model-grid button:hover {
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.2);
+      transform: translateY(-1px);
+      color: #fff;
+    }
+    .model-grid button.active {
+      background: rgba(132, 86, 240, 0.25);
+      border-color: #8456f0;
+      color: #fff;
+      box-shadow: 0 0 20px rgba(132, 86, 240, 0.15);
+    }
+
+    /* Color picker */
+    .color-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .color-row input[type="color"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 44px; height: 44px;
+      border: 2px solid rgba(255,255,255,0.15);
+      border-radius: 50%;
+      cursor: pointer;
+      background: none;
+      padding: 0;
+      transition: border-color 0.25s;
+    }
+    .color-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+    .color-row input[type="color"]::-webkit-color-swatch { border: none; border-radius: 50%; }
+    .color-row input[type="color"]::-moz-color-swatch { border: none; border-radius: 50%; }
+    .color-row input[type="color"]:hover { border-color: rgba(255,255,255,0.3); }
+    .color-row .color-hex {
+      font-size: 13px;
+      color: rgba(255,255,255,0.5);
+      font-family: 'SF Mono', monospace;
+    }
+
+    /* Density slider */
+    .density-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .density-row input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      flex: 1;
+      height: 4px;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.12);
+      outline: none;
+      transition: background 0.2s;
+    }
+    .density-row input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #ff6b9d, #8456f0);
+      cursor: pointer;
+      box-shadow: 0 0 16px rgba(132,86,240,0.4);
+      transition: transform 0.15s;
+    }
+    .density-row input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+    .density-row input[type="range"]::-moz-range-thumb {
+      width: 16px; height: 16px;
+      border: none; border-radius: 50%;
+      background: linear-gradient(135deg, #ff6b9d, #8456f0);
+      cursor: pointer;
+    }
+    .density-row .density-value {
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.7);
+      min-width: 48px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Status */
+    #hand-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: rgba(255,255,255,0.35);
+    }
+    #hand-status .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #555;
+      transition: background 0.3s;
+    }
+    #hand-status .dot.active { background: #4ade80; box-shadow: 0 0 12px rgba(74,222,128,0.5); }
+
+    /* ---- Camera Preview (Bottom-Left) ---- */
+    #camera-preview {
+      position: absolute;
+      bottom: 24px;
+      left: 24px;
+      width: 220px;
+      height: 165px;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      overflow: hidden;
+      z-index: 10;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.6);
+      min-width: 140px;
+      min-height: 105px;
+      max-width: 480px;
+      max-height: 360px;
+    }
+    #camera-preview video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+    #camera-preview canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    .preview-label {
+      position: absolute;
+      top: 8px;
+      left: 10px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      color: rgba(255,255,255,0.5);
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+      z-index: 2;
+      pointer-events: none;
+    }
+    #resize-handle {
+      position: absolute;
+      bottom: 0;
+      right: 0;
+      width: 20px;
+      height: 20px;
+      cursor: nwse-resize;
+      z-index: 3;
+      opacity: 0.4;
+      transition: opacity 0.2s;
+    }
+    #resize-handle::after {
+      content: '';
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      width: 10px;
+      height: 10px;
+      border-right: 2px solid rgba(255,255,255,0.4);
+      border-bottom: 2px solid rgba(255,255,255,0.4);
+      border-radius: 0 0 3px 0;
+    }
+    #camera-preview:hover #resize-handle { opacity: 0.8; }
+    .no-hand-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255,255,255,0.25);
+      font-size: 13px;
+      letter-spacing: 1px;
+      pointer-events: none;
+      z-index: 1;
+      transition: opacity 0.5s;
+    }
+
+    /* ---- Fullscreen Button ---- */
+    #fullscreen-btn {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      z-index: 10;
+      width: 46px;
+      height: 46px;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 50%;
+      background: rgba(10,10,30,0.5);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      color: rgba(255,255,255,0.6);
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.25s ease;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    }
+    #fullscreen-btn:hover {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      transform: scale(1.08);
+      border-color: rgba(255,255,255,0.2);
+    }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 640px) {
+      #controls {
+        top: 12px;
+        right: 12px;
+        width: 180px;
+        padding: 14px 12px;
+        border-radius: 12px;
+      }
+      #controls h2 { font-size: 14px; }
+      .model-grid { grid-template-columns: 1fr; }
+      .model-grid button { padding: 8px; font-size: 12px; }
+      #camera-preview { width: 150px; height: 112px; bottom: 14px; left: 14px; }
+      #fullscreen-btn { width: 38px; height: 38px; font-size: 16px; bottom: 14px; right: 14px; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <p>粒子宇宙加载中</p>
+  <div class="progress-bar"><span id="load-progress"></span></div>
+</div>
+
+<div id="error" class="visible" style="display:none;">
+  <div>
+    <h2>⚠️ 初始化失败</h2>
+    <p id="error-msg"></p>
+  </div>
+</div>
+
+<div id="container">
+  <div id="controls">
+    <h2>✦ 粒子控制</h2>
+
+    <div class="control-group">
+      <label>模型选择</label>
+      <div class="model-grid" id="shape-buttons">
+        <button data-shape="nebula" class="active">🌌 星云</button>
+        <button data-shape="fireworks">🎆 烟花</button>
+        <button data-shape="saturn">🪐 土星</button>
+        <button data-shape="flower">🌸 花朵</button>
+        <button data-shape="galaxy">✨ 银河</button>
+        <button data-shape="nested">🔮 套球</button>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <label>基础颜色</label>
+      <div class="color-row">
+        <input type="color" id="color-picker" value="#ff6b9d">
+        <span class="color-hex" id="color-hex">#ff6b9d</span>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <label>粒子密度</label>
+      <div class="density-row">
+        <input type="range" id="density-slider" min="3000" max="40000" value="18000" step="1000">
+        <span class="density-value" id="density-value">18k</span>
+      </div>
+    </div>
+
+    <div class="control-group" style="margin-bottom:0;">
+      <div id="hand-status">
+        <span class="dot" id="hand-dot"></span>
+        <span id="hand-text">等待摄像头…</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="camera-preview">
+    <span class="preview-label">📷 手势</span>
+    <video id="webcam" playsinline></video>
+    <canvas id="landmark-canvas"></canvas>
+    <div id="resize-handle"></div>
+  </div>
+
+  <button id="fullscreen-btn" title="全屏">⛶</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+// ============================================================
+// IMPORTS
+// ============================================================
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+// ============================================================
+// STATE
+// ============================================================
+const state = {
+  shape: 'nebula',
+  particleCount: 18000,
+  baseColor: '#ff6b9d',
+  // Interaction (from hand tracking)
+  targetRotX: 0,
+  targetRotY: 0,
+  targetSpread: 1,
+  currentRotX: 0,
+  currentRotY: 0,
+  currentSpread: 1,
+  handDetected: false,
+  handVisible: false,
+  // Auto-rotation when no hand
+  autoRotate: true,
+  // Hue shift from rotation
+  hueShift: 0,
+};
+
+// ============================================================
+// DOM REFS
+// ============================================================
+const container = document.getElementById('container');
+const loadingEl = document.getElementById('loading');
+const loadProgress = document.getElementById('load-progress');
+const errorEl = document.getElementById('error');
+const errorMsg = document.getElementById('error-msg');
+const handDot = document.getElementById('hand-dot');
+const handText = document.getElementById('hand-text');
+const colorPicker = document.getElementById('color-picker');
+const colorHex = document.getElementById('color-hex');
+const densitySlider = document.getElementById('density-slider');
+const densityValue = document.getElementById('density-value');
+const shapeButtons = document.querySelectorAll('#shape-buttons button');
+const fullscreenBtn = document.getElementById('fullscreen-btn');
+const video = document.getElementById('webcam');
+const landmarkCanvas = document.getElementById('landmark-canvas');
+const cameraPreview = document.getElementById('camera-preview');
+const resizeHandle = document.getElementById('resize-handle');
+
+// ============================================================
+// THREE.JS SETUP
+// ============================================================
+let renderer, scene, camera, composer, bloomPass;
+let particleSystem, starField;
+let particleGroup;
+
+function initThree() {
+  renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: false,
+  });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.9;
+  container.prepend(renderer.domElement);
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x050510);
+
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 200);
+  camera.position.set(0, 0.5, 6.5);
+  camera.lookAt(0, 0, 0);
+
+  composer = new EffectComposer(renderer);
+  const renderPass = new RenderPass(scene, camera);
+  composer.addPass(renderPass);
+
+  bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    0.9,   // strength — reduced for sharper detail
+    0.15,  // radius — tighter glow spread
+    0.18   // threshold — bloom only bright areas
+  );
+  composer.addPass(bloomPass);
+
+  window.addEventListener('resize', onResize);
+}
+
+function onResize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+}
+
+// ============================================================
+// PARTICLE HELPERS
+// ============================================================
+function hslToRgb(h, s, l) {
+  h = ((h % 1) + 1) % 1;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((h * 6) % 2 - 1));
+  const m = l - c / 2;
+  let r, g, b;
+  if (h < 1/6) { r=c; g=x; b=0; }
+  else if (h < 2/6) { r=x; g=c; b=0; }
+  else if (h < 3/6) { r=0; g=c; b=x; }
+  else if (h < 4/6) { r=0; g=x; b=c; }
+  else if (h < 5/6) { r=x; g=0; b=c; }
+  else { r=c; g=0; b=x; }
+  return [r + m, g + m, b + m];
+}
+
+let _glowTexture = null;
+function createGlowTexture() {
+  if (_glowTexture) return _glowTexture;
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const ctx = c.getContext('2d');
+  // Sharper glow: brighter core, tighter falloff
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.08, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.5, 'rgba(255,255,255,0.12)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  _glowTexture = new THREE.CanvasTexture(c);
+  _glowTexture.needsUpdate = true;
+  return _glowTexture;
+}
+
+// ============================================================
+// SHAPE GENERATORS
+// Each returns { positions, baseHues, saturations, lightnesses, sizes }
+// positions: Float32Array of xyz
+// baseHues, saturations, lightnesses, sizes: Float32Array
+// ============================================================
+function genNebula(n) {
+  const pos = new Float32Array(n * 3);
+  const hues = new Float32Array(n);
+  const sats = new Float32Array(n);
+  const lts  = new Float32Array(n);
+  const sizes = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const r = Math.pow(Math.random(), 1.2) * 4.5;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    pos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+    pos[i*3+1] = r * Math.sin(phi) * Math.sin(theta) * 0.7;
+    pos[i*3+2] = r * Math.cos(phi) * 0.6;
+    hues[i] = 0.55 + Math.random() * 0.45;
+    sats[i] = 0.6 + Math.random() * 0.3;
+    lts[i]  = 0.5 + Math.random() * 0.3;
+    sizes[i] = 0.035 + Math.random() * 0.065;
+  }
+  return { positions: pos, baseHues: hues, saturations: sats, lightnesses: lts, sizes };
+}
+
+function genFireworks(n) {
+  const pos = new Float32Array(n * 3);
+  const hues = new Float32Array(n);
+  const sats = new Float32Array(n);
+  const lts  = new Float32Array(n);
+  const sizes = new Float32Array(n);
+  const bursts = 12 + Math.floor(Math.random() * 8);
+  const perBurst = Math.floor(n / bursts);
+  let idx = 0;
+  for (let b = 0; b < bursts && idx < n; b++) {
+    const cx = (Math.random() - 0.5) * 6;
+    const cy = (Math.random() - 0.5) * 4;
+    const cz = (Math.random() - 0.5) * 3;
+    const hBase = Math.random();
+    for (let j = 0; j < perBurst && idx < n; j++) {
+      const r = Math.pow(Math.random(), 0.6) * 2.0;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      pos[idx*3]   = cx + r * Math.sin(phi) * Math.cos(theta);
+      pos[idx*3+1] = cy + r * Math.sin(phi) * Math.sin(theta);
+      pos[idx*3+2] = cz + r * Math.cos(phi);
+      hues[idx] = (hBase + (Math.random() - 0.5) * 0.2 + 1) % 1;
+      sats[idx] = 0.8 + Math.random() * 0.2;
+      lts[idx]  = 0.55 + Math.random() * 0.35;
+      sizes[idx] = 0.045 + Math.random() * 0.08;
+      idx++;
+    }
+  }
+  while (idx < n) {
+    const r = Math.random() * 2.5;
+    const theta = Math.random() * 2 * Math.PI;
+    const phi = Math.acos(2 * Math.random() - 1);
+    pos[idx*3]   = r * Math.sin(phi) * Math.cos(theta);
+    pos[idx*3+1] = r * Math.sin(phi) * Math.sin(theta);
+    pos[idx*3+2] = r * Math.cos(phi);
+    hues[idx] = Math.random();
+    sats[idx] = 0.8;
+    lts[idx]  = 0.7;
+    sizes[idx] = 0.035 + Math.random() * 0.06;
+    idx++;
+  }
+  return { positions: pos, baseHues: hues, saturations: sats, lightnesses: lts, sizes };
+}
+
+function genSaturn(n) {
+  const pos = new Float32Array(n * 3);
+  const hues = new Float32Array(n);
+  const sats = new Float32Array(n);
+  const lts  = new Float32Array(n);
+  const sizes = new Float32Array(n);
+  const sphereCount = Math.floor(n * 0.45);
+  const ringCount = n - sphereCount;
+  for (let i = 0; i < sphereCount; i++) {
+    const r = Math.pow(Math.random(), 1.5) * 1.4;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    pos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+    pos[i*3+1] = r * Math.sin(phi) * Math.sin(theta) * 0.85;
+    pos[i*3+2] = r * Math.cos(phi);
+    hues[i] = 0.03 + Math.random() * 0.1;
+    sats[i] = 0.5 + Math.random() * 0.3;
+    lts[i]  = 0.45 + Math.random() * 0.3;
+    sizes[i] = 0.03 + Math.random() * 0.055;
+  }
+  for (let i = 0; i < ringCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 1.5 + Math.random() * 2.0;
+    const tilt = (Math.random() - 0.5) * 0.25;
+    pos[(sphereCount+i)*3]   = Math.cos(angle) * radius;
+    pos[(sphereCount+i)*3+1] = tilt;
+    pos[(sphereCount+i)*3+2] = Math.sin(angle) * radius;
+    hues[sphereCount+i] = 0.06 + Math.random() * 0.12;
+    sats[sphereCount+i] = 0.4 + Math.random() * 0.4;
+    lts[sphereCount+i]  = 0.5 + Math.random() * 0.35;
+    sizes[sphereCount+i] = 0.03 + Math.random() * 0.05;
+  }
+  return { positions: pos, baseHues: hues, saturations: sats, lightnesses: lts, sizes };
+}
+
+function genFlower(n) {
+  const pos = new Float32Array(n * 3);
+  const hues = new Float32Array(n);
+  const sats = new Float32Array(n);
+  const lts  = new Float32Array(n);
+  const sizes = new Float32Array(n);
+  const petals = 7;
+  for (let i = 0; i < n; i++) {
+    const petalIdx = Math.floor(Math.random() * petals);
+    const pAngle = (petalIdx / petals) * Math.PI * 2;
+    const t = Math.random();
+    const r = t * 3.0;
+    const spread = Math.sin(t * Math.PI) * 0.8;
+    const angleOffset = (Math.random() - 0.5) * 0.3;
+    const angle = pAngle + angleOffset;
+    const rise = Math.sin(t * Math.PI * 2) * 0.4;
+    pos[i*3]   = Math.cos(angle) * r + Math.cos(angle) * spread * 0.5;
+    pos[i*3+1] = rise + (Math.random() - 0.5) * 0.3;
+    pos[i*3+2] = Math.sin(angle) * r + Math.sin(angle) * spread * 0.5;
+    hues[i] = 0.78 + Math.random() * 0.2;
+    sats[i] = 0.7 + Math.random() * 0.25;
+    lts[i]  = 0.5 + Math.random() * 0.3;
+    sizes[i] = 0.035 + Math.random() * 0.065;
+  }
+  return { positions: pos, baseHues: hues, saturations: sats, lightnesses: lts, sizes };
+}
+
+function genGalaxy(n) {
+  const pos = new Float32Array(n * 3);
+  const hues = new Float32Array(n);
+  const sats = new Float32Array(n);
+  const lts  = new Float32Array(n);
+  const sizes = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const arm = Math.floor(Math.random() * 3);
+    const dist = Math.pow(Math.random(), 0.5) * 4.5;
+    const angle = arm * (Math.PI * 2 / 3) + dist * 0.9 + (Math.random() - 0.5) * 0.5;
+    const scatter = (Math.random() - 0.5) * 0.5 * (1 + dist * 0.15);
+    pos[i*3]   = Math.cos(angle) * dist + scatter;
+    pos[i*3+1] = (Math.random() - 0.5) * 0.6 * (1 - dist / 6);
+    pos[i*3+2] = Math.sin(angle) * dist + scatter;
+    hues[i] = 0.5 + dist / 10 + (Math.random() - 0.5) * 0.2;
+    sats[i] = 0.6 + Math.random() * 0.3;
+    lts[i]  = 0.5 + Math.random() * 0.3;
+    sizes[i] = 0.03 + Math.random() * 0.055;
+  }
+  return { positions: pos, baseHues: hues, saturations: sats, lightnesses: lts, sizes };
+}
+
+function genNestedSpheres(n) {
+  const pos = new Float32Array(n * 3);
+  const hues = new Float32Array(n);
+  const sats = new Float32Array(n);
+  const lts  = new Float32Array(n);
+  const sizes = new Float32Array(n);
+  const innerCount = Math.floor(n * 0.35);
+  const outerCount = n - innerCount;
+  // Inner sphere — dense, warm, bright
+  for (let i = 0; i < innerCount; i++) {
+    const r = Math.pow(Math.random(), 1.8) * 1.2;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    pos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+    pos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+    pos[i*3+2] = r * Math.cos(phi);
+    hues[i] = 0.0 + Math.random() * 0.12;
+    sats[i] = 0.7 + Math.random() * 0.3;
+    lts[i]  = 0.55 + Math.random() * 0.35;
+    sizes[i] = 0.035 + Math.random() * 0.06;
+  }
+  // Outer sphere — sparse, cool colors, larger radius, slight wobble
+  for (let i = 0; i < outerCount; i++) {
+    const baseR = 3.2 + Math.random() * 1.3;
+    const wobble = Math.sin(Math.random() * Math.PI * 4) * 0.3;
+    const r = baseR + wobble;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    pos[(innerCount+i)*3]   = r * Math.sin(phi) * Math.cos(theta);
+    pos[(innerCount+i)*3+1] = r * Math.sin(phi) * Math.sin(theta);
+    pos[(innerCount+i)*3+2] = r * Math.cos(phi);
+    hues[innerCount+i] = 0.5 + Math.random() * 0.35;
+    sats[innerCount+i] = 0.5 + Math.random() * 0.35;
+    lts[innerCount+i]  = 0.5 + Math.random() * 0.25;
+    sizes[innerCount+i] = 0.025 + Math.random() * 0.055;
+  }
+  return { positions: pos, baseHues: hues, saturations: sats, lightnesses: lts, sizes };
+}
+
+const shapeGenerators = {
+  nebula: genNebula,
+  fireworks: genFireworks,
+  saturn: genSaturn,
+  flower: genFlower,
+  galaxy: genGalaxy,
+  nested: genNestedSpheres,
+};
+
+// ============================================================
+// PARTICLE SYSTEM
+// ============================================================
+function createParticleSystem(count, shapeName) {
+  if (particleGroup) {
+    scene.remove(particleGroup);
+    particleGroup.geometry.dispose();
+    particleGroup.material.dispose();
+  }
+
+  const gen = shapeGenerators[shapeName];
+  const data = gen(count);
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+  geometry.setAttribute('size', new THREE.BufferAttribute(data.sizes, 1));
+
+  // Store base color data for per-frame hue shifting
+  particleSystem = {
+    count,
+    positions: data.positions,
+    baseHues: data.baseHues,
+    saturations: data.saturations,
+    lightnesses: data.lightnesses,
+    baseSizes: data.sizes,
+    // Working arrays for per-frame color update
+    colors: new Float32Array(count * 3),
+  };
+
+  // Initial colors
+  const tempHSL = { h: 0, s: 0, l: 0 };
+  for (let i = 0; i < count; i++) {
+    const [r, g, b] = hslToRgb(
+      data.baseHues[i],
+      data.saturations[i],
+      data.lightnesses[i]
+    );
+    particleSystem.colors[i*3] = r;
+    particleSystem.colors[i*3+1] = g;
+    particleSystem.colors[i*3+2] = b;
+  }
+  geometry.setAttribute('color', new THREE.BufferAttribute(particleSystem.colors, 3));
+
+  const material = new THREE.PointsMaterial({
+    size: 0.10,
+    map: createGlowTexture(),
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    transparent: true,
+    vertexColors: true,
+    sizeAttenuation: true,
+    opacity: 1.0,
+  });
+
+  particleGroup = new THREE.Points(geometry, material);
+  // Store original positions for spread scaling
+  particleGroup.userData.origPos = new Float32Array(data.positions);
+  scene.add(particleGroup);
+
+  updateParticleDensityLabel();
+}
+
+function updateParticleColors(hueShift) {
+  if (!particleSystem) return;
+  const { count, baseHues, saturations, lightnesses, colors } = particleSystem;
+  for (let i = 0; i < count; i++) {
+    const h = (baseHues[i] + hueShift + 1) % 1;
+    const [r, g, b] = hslToRgb(h, saturations[i], lightnesses[i]);
+    colors[i*3] = r;
+    colors[i*3+1] = g;
+    colors[i*3+2] = b;
+  }
+  particleGroup.geometry.attributes.color.needsUpdate = true;
+}
+
+function updateParticlePositions(spread) {
+  if (!particleGroup) return;
+  const orig = particleGroup.userData.origPos;
+  const pos = particleGroup.geometry.attributes.position.array;
+  const count = particleSystem.count;
+  for (let i = 0; i < count * 3; i++) {
+    pos[i] = orig[i] * spread;
+  }
+  particleGroup.geometry.attributes.position.needsUpdate = true;
+}
+
+function updateParticleDensityLabel() {
+  const v = Math.round(state.particleCount / 1000);
+  densityValue.textContent = v >= 100 ? '99k+' : v + 'k';
+}
+
+function switchShape(shapeName) {
+  state.shape = shapeName;
+  createParticleSystem(state.particleCount, shapeName);
+  shapeButtons.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.shape === shapeName);
+  });
+}
+
+function updateDensity(val) {
+  state.particleCount = parseInt(val);
+  createParticleSystem(state.particleCount, state.shape);
+}
+
+// ============================================================
+// BACKGROUND STARS
+// ============================================================
+function createStarField() {
+  const n = 4000;
+  const pos = new Float32Array(n * 3);
+  const colors = new Float32Array(n * 3);
+  const sizes = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const r = 20 + Math.random() * 100;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    pos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+    pos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+    pos[i*3+2] = r * Math.cos(phi);
+    const bright = 0.3 + Math.random() * 0.7;
+    const tint = Math.random();
+    if (tint < 0.3) { // warm
+      colors[i*3]=bright; colors[i*3+1]=bright*0.85; colors[i*3+2]=bright*0.7;
+    } else if (tint < 0.6) { // cool
+      colors[i*3]=bright*0.7; colors[i*3+1]=bright*0.8; colors[i*3+2]=bright;
+    } else { // white
+      colors[i*3]=bright; colors[i*3+1]=bright; colors[i*3+2]=bright;
+    }
+    sizes[i] = 0.015 + Math.random() * 0.03;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+  const mat = new THREE.PointsMaterial({
+    size: 0.04,
+    map: createGlowTexture(),
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    transparent: true,
+    vertexColors: true,
+    sizeAttenuation: true,
+    opacity: 0.6,
+  });
+  starField = new THREE.Points(geo, mat);
+  scene.add(starField);
+}
+
+// ============================================================
+// MEDIAPIPE HANDS
+// ============================================================
+let handsInstance = null;
+let lastHandData = null;
+
+async function initMediaPipe() {
+  const { Hands, HAND_CONNECTIONS } = window;
+  if (!Hands) throw new Error('MediaPipe Hands 加载失败');
+
+  handsInstance = new Hands({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`,
+  });
+
+  handsInstance.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.5,
+  });
+
+  handsInstance.onResults(onHandResults);
+
+  // Start camera
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { width: 640, height: 480, facingMode: 'user' },
+  });
+  video.srcObject = stream;
+  await video.play();
+
+  // Set up landmark canvas dimensions
+  landmarkCanvas.width = video.videoWidth || 640;
+  landmarkCanvas.height = video.videoHeight || 480;
+
+  // Start processing loop
+  requestAnimationFrame(processFrame);
+}
+
+let frameProcessing = false;
+async function processFrame() {
+  if (handsInstance && !frameProcessing && video.readyState >= 2) {
+    frameProcessing = true;
+    try {
+      await handsInstance.send({ image: video });
+    } catch (e) {
+      // silently handle frame errors
+    }
+    frameProcessing = false;
+  }
+  requestAnimationFrame(processFrame);
+}
+
+function onHandResults(results) {
+  const ctx = landmarkCanvas.getContext('2d');
+  ctx.clearRect(0, 0, landmarkCanvas.width, landmarkCanvas.height);
+
+  // Flip horizontally for mirror
+  ctx.save();
+  ctx.translate(landmarkCanvas.width, 0);
+  ctx.scale(-1, 1);
+
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    const landmarks = results.multiHandLandmarks[0];
+    lastHandData = landmarks;
+
+    // Update hand status
+    handDot.classList.add('active');
+    handText.textContent = '手部已检测';
+    state.handDetected = true;
+    state.handVisible = true;
+
+    // Draw landmarks
+    if (window.drawConnectors) {
+      window.drawConnectors(ctx, landmarks, window.HAND_CONNECTIONS, {
+        color: '#8456f0',
+        lineWidth: 2,
+      });
+      window.drawLandmarks(ctx, landmarks, {
+        color: '#ff6b9d',
+        lineWidth: 1,
+        radius: 3,
+      });
+    }
+
+    // Compute interaction parameters
+    computeInteraction(landmarks);
+  } else {
+    if (state.handDetected) {
+      handDot.classList.remove('active');
+      handText.textContent = '未检测到';
+    }
+    state.handDetected = false;
+    lastHandData = null;
+  }
+
+  ctx.restore();
+}
+
+function computeInteraction(landmarks) {
+  // Hand center: use wrist (0) as reference
+  const wrist = landmarks[0];
+  // Index tip (8) and thumb tip (4) for spread
+  const indexTip = landmarks[8];
+  const pinkyTip = landmarks[20];
+  const middleMcp = landmarks[9];
+
+  // Hand position → rotation (map 0-1 to -PI to PI)
+  const tx = (wrist.x - 0.5) * 2;
+  const ty = (wrist.y - 0.5) * -2;
+  state.targetRotY = tx * Math.PI * 0.8;
+  state.targetRotX = ty * Math.PI * 0.5;
+
+  // Hand open/close → spread
+  // Distance between index tip (8) and pinky tip (20)
+  const dx = indexTip.x - pinkyTip.x;
+  const dy = indexTip.y - pinkyTip.y;
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  // Normalize by hand size (wrist to middle MCP)
+  const hdx = wrist.x - middleMcp.x;
+  const hdy = wrist.y - middleMcp.y;
+  const handSize = Math.sqrt(hdx*hdx + hdy*hdy) || 0.01;
+  const normalizedDist = dist / handSize;
+
+  // Map to spread: ~0.3 (closed) to ~2.5 (open)
+  state.targetSpread = Math.max(0.2, Math.min(2.8, normalizedDist * 1.8));
+
+  // Auto-rotation off when hand detected
+  state.autoRotate = false;
+}
+
+// ============================================================
+// ANIMATION LOOP
+// ============================================================
+function animate() {
+  requestAnimationFrame(animate);
+
+  // ---- Smooth interpolation ----
+  const lerpFactor = 0.08;
+  state.currentRotX += (state.targetRotX - state.currentRotX) * lerpFactor;
+  state.currentRotY += (state.targetRotY - state.currentRotY) * lerpFactor;
+  state.currentSpread += (state.targetSpread - state.currentSpread) * lerpFactor;
+
+  // Auto-rotation when no hand
+  if (state.autoRotate) {
+    state.currentRotY += 0.006;
+    state.currentRotX = Math.sin(Date.now() * 0.0004) * 0.2;
+    state.targetSpread = 1 + Math.sin(Date.now() * 0.0005) * 0.08;
+  } else if (!state.handDetected) {
+    // Hand lost, fade to auto-rotate
+    state.autoRotate = true;
+  }
+
+  // ---- Update particle group ----
+  if (particleGroup) {
+    particleGroup.rotation.x = state.currentRotX;
+    particleGroup.rotation.y = state.currentRotY;
+
+    // Update positions based on spread
+    updateParticlePositions(state.currentSpread);
+
+    // Hue shift from rotation
+    state.hueShift = (state.currentRotY * 0.15 + state.currentRotX * 0.1) % 1;
+    updateParticleColors(state.hueShift);
+  }
+
+  // ---- Rotate star field ----
+  if (starField) {
+    starField.rotation.y += 0.00008;
+    starField.rotation.x += 0.00003;
+  }
+
+  // ---- Render ----
+  composer.render();
+}
+
+// ============================================================
+// UI BINDINGS
+// ============================================================
+function bindUI() {
+  // Shape buttons
+  shapeButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      switchShape(btn.dataset.shape);
+    });
+  });
+
+  // Color picker
+  colorPicker.addEventListener('input', () => {
+    state.baseColor = colorPicker.value;
+    colorHex.textContent = colorPicker.value;
+    // Update the base tint of particles (bloom color will change naturally)
+  });
+
+  // Density slider
+  densitySlider.addEventListener('input', () => {
+    updateDensity(densitySlider.value);
+  });
+
+  // Fullscreen
+  fullscreenBtn.addEventListener('click', toggleFullscreen);
+
+  // Camera preview resize
+  let isResizing = false;
+  resizeHandle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    e.preventDefault();
+    document.addEventListener('mousemove', onResizeMove);
+    document.addEventListener('mouseup', onResizeEnd);
+  });
+
+  function onResizeMove(e) {
+    if (!isResizing) return;
+    const rect = cameraPreview.getBoundingClientRect();
+    const newW = Math.max(140, Math.min(480, e.clientX - rect.left));
+    const newH = Math.max(105, Math.min(360, e.clientY - rect.top));
+    cameraPreview.style.width = newW + 'px';
+    cameraPreview.style.height = newH + 'px';
+  }
+  function onResizeEnd() {
+    isResizing = false;
+    document.removeEventListener('mousemove', onResizeMove);
+    document.removeEventListener('mouseup', onResizeEnd);
+  }
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
+// ============================================================
+// FALLBACK: Mouse control when no camera
+// ============================================================
+let mouseDown = false;
+let mouseX = 0, mouseY = 0;
+function setupMouseFallback() {
+  container.addEventListener('mousedown', (e) => {
+    if (e.target.closest('#controls') || e.target.closest('#camera-preview') ||
+        e.target.closest('#fullscreen-btn')) return;
+    mouseDown = true;
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!mouseDown) return;
+    const dx = e.clientX - mouseX;
+    const dy = e.clientY - mouseY;
+    state.targetRotY += dx * 0.01;
+    state.targetRotX += dy * 0.01;
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    state.autoRotate = false;
+  });
+  document.addEventListener('mouseup', () => {
+    mouseDown = false;
+    // Don't immediately auto-rotate; let it drift
+  });
+  container.addEventListener('wheel', (e) => {
+    state.targetSpread += e.deltaY * 0.002;
+    state.targetSpread = Math.max(0.2, Math.min(3.0, state.targetSpread));
+    state.autoRotate = false;
+  }, { passive: true });
+}
+
+// ============================================================
+// INIT
+// ============================================================
+async function init() {
+  try {
+    // Step 1: Three.js
+    loadProgress.style.width = '10%';
+    initThree();
+    await new Promise(r => setTimeout(r, 50));
+    loadProgress.style.width = '30%';
+
+    // Step 2: Particle system
+    createParticleSystem(state.particleCount, state.shape);
+    loadProgress.style.width = '50%';
+
+    // Step 3: Star field
+    createStarField();
+    loadProgress.style.width = '65%';
+
+    // Step 4: UI
+    bindUI();
+    setupMouseFallback();
+    loadProgress.style.width = '75%';
+
+    // Step 5: MediaPipe (may fail gracefully)
+    try {
+      await initMediaPipe();
+      loadProgress.style.width = '95%';
+    } catch (camErr) {
+      console.warn('Camera/MediaPipe not available:', camErr.message);
+      handText.textContent = '📷 摄像头不可用';
+      handDot.style.background = '#f59e0b';
+      // Fallback auto-rotation enabled by default
+      state.autoRotate = true;
+      loadProgress.style.width = '95%';
+    }
+
+    // Step 6: Start animation
+    animate();
+    loadProgress.style.width = '100%';
+
+    setTimeout(() => {
+      loadingEl.classList.add('hidden');
+    }, 500);
+
+  } catch (err) {
+    console.error('Init error:', err);
+    errorMsg.textContent = err.message || '未知错误';
+    errorEl.style.display = 'flex';
+    loadingEl.classList.add('hidden');
+  }
+}
+
+init();
+</script>
+</body>
+</html>
